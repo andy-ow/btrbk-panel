@@ -1,7 +1,20 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
 [project]
 name = "btrbk-panel"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+  "freesimplegui>=5.2.0.post1",
+]
+
+[project.scripts]
+btrbk-panel = "btrbk_panel.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/btrbk_panel"]
+
