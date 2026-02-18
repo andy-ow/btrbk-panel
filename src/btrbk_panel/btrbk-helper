@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+BTRBK="/usr/bin/btrbk"
+LOG="/var/log/btrbk.log"
+
+usage() {
+  echo "Usage: $0 run|dry GROUP" >&2
+  exit 2
+}
+
+[[ $# -eq 2 ]] || usage
+mode="$1"
+group="$2"
+
+case "$mode" in
+  run) opts=() ;;
+  dry) opts=(-n) ;;   # jeśli u Ciebie dry-run inaczej, zmień tutaj
+  *) usage ;;
+esac
+
+# Odpal btrbk dla grupy
+exec "$BTRBK" "${opts[@]}" run "$group"
