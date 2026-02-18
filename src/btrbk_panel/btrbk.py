@@ -4,7 +4,7 @@ from .linux import ensure_on_path, build_gui_env, run_command, MissingDependency
 from .model import CommandResult
 
 
-def run_btrbk(action: str, group: str) -> CommandResult:
+def run_btrbk(action: str, groups: list[str]) -> CommandResult:
     """
     action: 'dryrun' albo 'run'
     """
@@ -12,5 +12,5 @@ def run_btrbk(action: str, group: str) -> CommandResult:
     ensure_on_path("btrbk")
     env = build_gui_env()
     
-    return run_command(["pkexec", "btrbk", action, group], env=env)
+    return run_command(["pkexec", "btrbk", action, *groups], env=env)
     

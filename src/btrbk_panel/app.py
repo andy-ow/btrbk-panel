@@ -5,64 +5,69 @@ from typing import Optional
 
 import FreeSimpleGUI as sg
 
+from btrbk_panel.model import MountEntry
+
 from .presenter import Presenter
 from .state import AppState
 
 KEY_OUT = "-OUT-"
 KEY_STATUS = "-STATUS-"
-MAX_ROWS = 30  # ustaw na sensowną górkę
 
+def get_selected_mounts(values: dict, mounts: list[MountEntry]) -> list[MountEntry]:
+    return [m for m in mounts if values.get(m)]
 
-@dataclass
-class ViewCtx:
-    # mapowanie wiersz->nazwa mounta (albo None gdy wiersz pusty)
-    row_name: list[Optional[str]]
-
-
-def make_rows() -> list[list[sg.Element]]:
+def make_rows(mounts: list[MountEntry], selected: list[MountEntry]) -> list[list[sg.Element]]:
     rows: list[list[sg.Element]] = []
-    for i in range(MAX_ROWS):
-        rows.append([
-            sg.Radio("", group_id="MOUNTS", key=f"-SEL-{i}-", enable_events=True, visible=False),
-            sg.Text("", key=f"-NAME-{i}-", size=(18, 1), visible=False),
-            sg.Text("", key=f"-STATE-{i}-", size=(12, 1), visible=False),
-            sg.Text("", key=f"-PATH-{i}-", size=(50, 1), visible=False),
-        ])
+    for m in mounts:
+        is_sel = (m.name in selected) #(selected == m)
+        status_color = "green" if m.mounted else "gray"
+        status_text = "mounted" if m.mounted else "not mounted"
+        rows.append(
+            [
+                sg.Checkbox(
+                    m.name,
+                    key=m, #f"-MOUNT-{m.name}-",
+                    default=is_sel,
+                    enable_events=True,
+                    disabled=not m.mounted,
+                    metadata=m,
+                ),
+                sg.Text(status_text, text_color=status_color, pad=(6, 0)),
+                sg.Text(m.path, text_color="black" if m.mounted else "gray", pad=(6, 0)),
+            ]
+        )
+    if not rows:
+        rows = [[sg.Text("Brak katalogów *_backup w /mnt", text_color="gray")]]
     return rows
 
+def create_window(mounts: list[MountEntry], selected: list[MountEntry]) -> sg.Window:
 
-def render(window: sg.Window, state: AppState, ctx: ViewCtx) -> None:
+    layout = [
+        [sg.Text("Backup mounts in /mnt (name contains _backup):")],
+        [sg.Column(make_rows(mounts, selected), key='column', scrollable=True, vertical_scroll_only=True, size=(760, 220))],
+        [
+            sg.Button("Refresh"),
+            sg.Button("Dryrun", key="Dryrun", disabled=True),
+            sg.Button("Run", key="Run", disabled=True),
+            sg.Button("Exit"),
+            sg.Text("", key=KEY_STATUS, expand_x=True),
+        ],
+        [sg.Multiline(key=KEY_OUT, size=(110, 28), autoscroll=True, disabled=True)],
+    ]
+
+    window = sg.Window("btrbk-panel", layout, finalize=True)
+    return window
+
+
+def render(window: sg.Window, state: AppState) -> None:
     mounts = state.mounts
-
-    # wiersze
-    for i in range(MAX_ROWS):
-        if i < len(mounts):
-            m = mounts[i]
-            ctx.row_name[i] = m.name
-
-            window[f"-SEL-{i}-"].update(value=(state.selected_name == m.name), visible=True, disabled=not m.mounted)
-            window[f"-NAME-{i}-"].update(value=m.name, visible=True, text_color="black" if m.mounted else "gray")
-
-            window[f"-STATE-{i}-"].update(
-                value="mounted" if m.mounted else "not mounted",
-                visible=True,
-                text_color="green" if m.mounted else "gray",
-            )
-
-            window[f"-PATH-{i}-"].update(
-                value=m.path,
-                visible=True,
-                text_color="black" if m.mounted else "gray",
-            )
-        else:
-            ctx.row_name[i] = None
-            window[f"-SEL-{i}-"].update(visible=False)
-            window[f"-NAME-{i}-"].update(visible=False)
-            window[f"-STATE-{i}-"].update(visible=False)
-            window[f"-PATH-{i}-"].update(visible=False)
-
+    if not all([m in window.AllKeysDict for m in mounts]):
+        #window = create_window(state.mounts, state.selected_mount_entries)
+        window['column'].update(make_rows(mounts, state.selected_mount_entries))
+    for m in mounts:
+        window[m].update(value=(m in state.selected_mount_entries), visible=True, disabled=not m.mounted)
     # przyciski
-    can_run = (state.selected_name is not None) and (not state.busy)
+    can_run = (len(state.selected_mount_entries) != 0) and (not state.busy)
     window["Dryrun"].update(disabled=not can_run)
     window["Run"].update(disabled=not can_run)
 
@@ -77,9 +82,11 @@ def render(window: sg.Window, state: AppState, ctx: ViewCtx) -> None:
         window[KEY_STATUS].update(state.error, text_color="red")
     else:
         window[KEY_STATUS].update("", text_color="gray")
+    
+    return
 
 
-def handle_event(event: str, values: dict, presenter: Presenter, state: AppState, ctx: ViewCtx) -> None:
+def handle_event(event: str, values: dict, presenter: Presenter, state: AppState) -> None:
     if event == "Refresh":
         presenter.refresh()
         return
@@ -92,14 +99,9 @@ def handle_event(event: str, values: dict, presenter: Presenter, state: AppState
         presenter.run()
         return
 
-    if isinstance(event, str) and event.startswith("-SEL-"):
-        # znajdź, który index jest zaznaczony
-        picked: Optional[str] = None
-        for i in range(MAX_ROWS):
-            if values.get(f"-SEL-{i}-"):
-                picked = ctx.row_name[i]
-                break
-        presenter.select(picked)
+    if isinstance(event, MountEntry):
+        selected = get_selected_mounts(values, state.mounts)
+        presenter.select(selected)
         return
 
 
@@ -108,30 +110,17 @@ def run_gui() -> int:
     presenter = Presenter("/mnt")
 
     state = AppState()
-    ctx = ViewCtx(row_name=[None] * MAX_ROWS)
-
-    layout = [
-        [sg.Text("Backup mounts in /mnt (name contains _backup):")],
-        [sg.Column(make_rows(), scrollable=True, vertical_scroll_only=True, size=(760, 220))],
-        [
-            sg.Button("Refresh"),
-            sg.Button("Dryrun", key="Dryrun", disabled=True),
-            sg.Button("Run", key="Run", disabled=True),
-            sg.Button("Exit"),
-            sg.Text("", key=KEY_STATUS, expand_x=True),
-        ],
-        [sg.Multiline(key=KEY_OUT, size=(110, 28), autoscroll=True, disabled=True)],
-    ]
-
-    window = sg.Window("btrbk-panel", layout, finalize=True)
-
+    state_has_changed = False
     # observer: tylko aktualizuje state (bez dotykania UI)
     def on_state_change(st: AppState) -> None:
         nonlocal state
+        nonlocal state_has_changed
         state = st
+        state_has_changed = True
 
     presenter.subscribe(on_state_change)
     presenter.refresh()
+    window = create_window(state.mounts, state.selected_mount_entries)
 
     try:
         while True:
@@ -140,10 +129,10 @@ def run_gui() -> int:
                 break
 
             if event is not None and event != sg.TIMEOUT_EVENT:
-                handle_event(event, values, presenter, state, ctx)
+                handle_event(event, values, presenter, state)
 
             # --- NA KOŃCU ITERACJI: zawsze render z aktualnego state ---
-            render(window, state, ctx)
+            if state_has_changed: render(window, state)
 
     finally:
         window.close()
